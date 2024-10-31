@@ -10,47 +10,25 @@ import (
 
 // Task структура задачи
 type Task struct {
-	ID           string   `json:"id"`
-	Description  string   `json:"description"`
-	Note         string   `json:"note"`
-	Applications []string `json:"applications"`
+	ID          string `json:"id"`
+	Description string `json:"description"`
 }
 
-var tasks = map[string]Task{
-	"1": {
-		ID:          "1",
-		Description: "Сделать финальное задание темы REST API",
-		Note:        "Если сегодня сделаю, то завтра будет свободный день. Ура!",
-		Applications: []string{
-			"VS Code",
-			"Terminal",
-			"git",
-		},
-	},
-	"2": {
-		ID:          "2",
-		Description: "Протестировать финальное задание с помощью Postmen",
-		Note:        "Лучше это делать в процессе разработки, каждый раз, когда запускаешь сервер и проверяешь хендлер",
-		Applications: []string{
-			"VS Code",
-			"Terminal",
-			"git",
-			"Postman",
-		},
-	},
-}
+var tasks = map[string]Task{}
 
 // Получение всех задач
 func getAllTasks(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
 
 	tasksList := make([]Task, 0, len(tasks))
 	for _, task := range tasks {
 		tasksList = append(tasksList, task)
 	}
 
-	json.NewEncoder(w).Encode(tasksList)
+	if err := json.NewEncoder(w).Encode(tasksList); err != nil {
+		http.Error(w, "Failed to encode tasks", http.StatusInternalServerError)
+		return
+	}
 }
 
 // Добавление новой задачи
@@ -59,14 +37,23 @@ func createTask(w http.ResponseWriter, r *http.Request) {
 
 	var newTask Task
 	if err := json.NewDecoder(r.Body).Decode(&newTask); err != nil || newTask.ID == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid task data"})
+		http.Error(w, "Invalid task data", http.StatusBadRequest)
+		return
+	}
+
+	// Check if the task already exists
+	if _, exists := tasks[newTask.ID]; exists {
+		http.Error(w, "Task already exists", http.StatusConflict)
 		return
 	}
 
 	tasks[newTask.ID] = newTask
+
+	if err := json.NewEncoder(w).Encode(newTask); err != nil {
+		http.Error(w, "Failed to encode new task", http.StatusInternalServerError)
+		return
+	}
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(newTask)
 }
 
 // Получение задачи по ID
@@ -76,13 +63,14 @@ func getTaskByID(w http.ResponseWriter, r *http.Request) {
 
 	task, exists := tasks[id]
 	if !exists {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Task not found"})
+		http.Error(w, "Task not found", http.StatusNotFound)
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(task)
+	if err := json.NewEncoder(w).Encode(task); err != nil {
+		http.Error(w, "Failed to encode task", http.StatusInternalServerError)
+		return
+	}
 }
 
 // Удаление задачи по ID
@@ -90,21 +78,22 @@ func deleteTaskByID(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	id := chi.URLParam(r, "id")
 
-	_, exists := tasks[id]
-	if !exists {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Task not found"})
+	if _, exists := tasks[id]; !exists {
+		http.Error(w, "Task not found", http.StatusNotFound)
 		return
 	}
 
 	delete(tasks, id)
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"message": "Task deleted"})
+	if err := json.NewEncoder(w).Encode(map[string]string{"message": "Task deleted"}); err != nil {
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+		return
+	}
 }
 
 func main() {
 	r := chi.NewRouter()
 
+	// Регистрация обработчиков
 	r.Get("/tasks", getAllTasks)
 	r.Post("/tasks", createTask)
 	r.Get("/tasks/{id}", getTaskByID)
